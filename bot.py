@@ -6,22 +6,19 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import TelegramObject
+
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import get_settings
-from database.session import SessionLocal
+from database.session import SessionLocal  # <-- импорт фабрики сессий
 from handlers import admin, application, start
 
 
 class DbSessionMiddleware:
     async def __call__(self, handler, event: TelegramObject, data: dict):
-        async with SessionLocal() as session:
+        async with SessionLocal() as session:  # <-- создаём БД-сессию
             data["session"] = session
-            try:
-                return await handler(event, data)
-            finally:
-                if isinstance(session, AsyncSession):
-                    await session.close()
+            return await handler(event, data)
 
 
 def setup_logging() -> None:
@@ -39,10 +36,13 @@ async def main() -> None:
         token=settings.bot_token,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
     )
+
     dp = Dispatcher(storage=MemoryStorage())
 
+    # Подключаем middleware
     dp.update.middleware(DbSessionMiddleware())
 
+    # Роутеры
     dp.include_router(start.router)
     dp.include_router(application.router)
     dp.include_router(admin.router)
