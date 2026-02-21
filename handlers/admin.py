@@ -1,4 +1,5 @@
 import logging
+from html import escape
 
 from aiogram import F, Router
 from aiogram.filters import Command
@@ -18,11 +19,11 @@ logger = logging.getLogger(__name__)
 def _render_application(app: Application) -> str:
     return (
         f"ID: {app.id}\n"
-        f"Статус: {app.status}\n"
-        f"Имя: {app.name}\n"
-        f"Телефон: {app.phone}\n"
-        f"Адрес: {app.address}\n"
-        f"Описание: {app.description}\n"
+        f"Статус: {app.status.value}\n"
+        f"Имя: {escape(app.name)}\n"
+        f"Телефон: {escape(app.phone)}\n"
+        f"Адрес: {escape(app.address)}\n"
+        f"Описание: {escape(app.description)}\n"
         f"Фото: {'есть' if app.photo else 'нет'}\n"
         f"Создана: {app.created_at:%Y-%m-%d %H:%M}"
     )
@@ -106,7 +107,7 @@ async def admin_list(callback: CallbackQuery, session: AsyncSession) -> None:
         return
 
     text = f"Заявки со статусом '{status.value}', страница {page}:\n\n" + "\n\n".join(
-        [f"#{a.id}: {a.name}, {a.phone}, {a.address}" for a in apps]
+        [f"#{a.id}: {escape(a.name)}, {escape(a.phone)}, {escape(a.address)}" for a in apps]
     )
     await callback.message.edit_text(
         text,
