@@ -6,7 +6,7 @@ from aiogram.types import Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database.crud import get_or_create_user
-from keyboards.common import main_menu_keyboard
+from keyboards.reply import main_menu_keyboard
 
 router = Router()
 logger = logging.getLogger(__name__)
@@ -14,17 +14,19 @@ logger = logging.getLogger(__name__)
 
 @router.message(CommandStart())
 async def cmd_start(message: Message, session: AsyncSession) -> None:
+    if message.from_user is None:
+        return
+
     try:
-        user = await get_or_create_user(
-            session,
+        await get_or_create_user(
+            session=session,
             telegram_id=message.from_user.id,
             username=message.from_user.username,
         )
-        logger.info("User started bot: telegram_id=%s user_id=%s", message.from_user.id, user.id)
         await message.answer(
-            "Привет! Я помогу оставить заявку на услуги мастера. Нажмите кнопку ниже.",
+            "Добро пожаловать в сервис «Мастер на час». Нажмите кнопку ниже, чтобы создать заявку.",
             reply_markup=main_menu_keyboard(),
         )
     except Exception:
-        logger.exception("Failed to process /start")
+        logger.exception("Start handler failed")
         await message.answer("Произошла ошибка. Попробуйте позже.")
