@@ -1,4 +1,3 @@
-import logging
 from html import escape
 
 from aiogram import F, Router
@@ -7,75 +6,53 @@ from aiogram.types import CallbackQuery, Message
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from config import get_settings
-from database.crud import get_application_by_id, get_applications_by_status, get_last_applications
+from database.crud import get_applications_by_status
 from database.models import Application, ApplicationStatus
-from keyboards.common import admin_pagination_keyboard, admin_status_keyboard
+from keyboards.inline import admin_pagination_keyboard, admin_status_keyboard
 
 router = Router()
 settings = get_settings()
-logger = logging.getLogger(__name__)
+PAGE_SIZE = 5
 
 
-def _render_application(app: Application) -> str:
+def is_admin(telegram_id: int | None) -> bool:
+    return telegram_id == settings.admin_id
+
+
+def render_application_card(application: Application) -> str:
     return (
-        f"ID: {app.id}\n"
-        f"Статус: {app.status.value}\n"
-        f"Имя: {escape(app.name)}\n"
-        f"Телефон: {escape(app.phone)}\n"
-        f"Адрес: {escape(app.address)}\n"
-        f"Описание: {escape(app.description)}\n"
-        f"Фото: {'есть' if app.photo else 'нет'}\n"
-        f"Создана: {app.created_at:%Y-%m-%d %H:%M}"
+        f"#{application.id} | {application.created_at:%Y-%m-%d %H:%M}\n"
+        f"Имя: {escape(application.name)}\n"
+        f"Телефон: {escape(application.phone)}\n"
+        f"Адрес: {escape(application.address)}\n"
+        f"Описание: {escape(application.description)}\n"
+        f"Фото: {'есть' if application.photo else 'нет'}"
     )
 
 
 @router.message(Command("admin"))
-async def cmd_admin(message: Message) -> None:
-    if message.from_user.id != settings.admin_id:
-        await message.answer("Доступ запрещён")
+async def admin_panel(message: Message, session: AsyncSession) -> None:
+    if not is_admin(message.from_user.id if message.from_user else None):
+        await message.answer("Доступ запрещён.")
         return
 
-    await message.answer(
-        "Админ-панель:\n"
-        "- /admin_last — последние 10 заявок\n"
-        "- /admin_get <id> — заявка по ID\n"
-        "Или выберите статус:",
-        reply_markup=admin_status_keyboard(),
+    new_apps, new_total_pages = await get_applications_by_status(
+        session=session,
+        status=ApplicationStatus.NEW,
+        page=1,
+        page_size=PAGE_SIZE,
     )
 
-
-@router.message(Command("admin_last"))
-async def admin_last(message: Message, session: AsyncSession) -> None:
-    if message.from_user.id != settings.admin_id:
-        await message.answer("Доступ запрещён")
+    if not new_apps:
+        await message.answer("Админ-панель. Новых заявок пока нет.", reply_markup=admin_status_keyboard())
         return
 
-    apps = await get_last_applications(session, limit=10)
-    if not apps:
-        await message.answer("Заявок пока нет")
-        return
-
-    for app in apps:
-        await message.answer(_render_application(app))
-
-
-@router.message(Command("admin_get"))
-async def admin_get(message: Message, session: AsyncSession) -> None:
-    if message.from_user.id != settings.admin_id:
-        await message.answer("Доступ запрещён")
-        return
-
-    parts = (message.text or "").split(maxsplit=1)
-    if len(parts) != 2 or not parts[1].isdigit():
-        await message.answer("Использование: /admin_get <id>")
-        return
-
-    app = await get_application_by_id(session, int(parts[1]))
-    if not app:
-        await message.answer("Заявка не найдена")
-        return
-
-    await message.answer(_render_application(app))
+    text = "Новые заявки, страница 1:\n\n" + "\n\n".join(render_application_card(item) for item in new_apps)
+    await message.answer(
+        text,
+        reply_markup=admin_pagination_keyboard(ApplicationStatus.NEW.value, 1, new_total_pages),
+    )
+    await message.answer("Фильтр по статусам:", reply_markup=admin_status_keyboard())
 
 
 @router.callback_query(F.data == "admin:noop")
@@ -85,32 +62,34 @@ async def admin_noop(callback: CallbackQuery) -> None:
 
 @router.callback_query(F.data.startswith("admin:list:"))
 async def admin_list(callback: CallbackQuery, session: AsyncSession) -> None:
-    if callback.from_user.id != settings.admin_id:
+    if not is_admin(callback.from_user.id if callback.from_user else None):
         await callback.answer("Доступ запрещён", show_alert=True)
         return
 
     try:
-        _, _, status_str, page_str = callback.data.split(":", maxsplit=3)
-        status = ApplicationStatus(status_str)
-        page = max(1, int(page_str))
+        _, _, status_raw, page_raw = (callback.data or "").split(":", maxsplit=3)
+        status = ApplicationStatus(status_raw)
+        page = max(1, int(page_raw))
     except (ValueError, TypeError):
-        await callback.answer("Некорректные параметры")
+        await callback.answer("Некорректные параметры", show_alert=True)
         return
 
-    apps, total_pages = await get_applications_by_status(session, status, page=page, page_size=5)
-    if not apps:
+    apps, total_pages = await get_applications_by_status(
+        session=session,
+        status=status,
+        page=page,
+        page_size=PAGE_SIZE,
+    )
+
+    text = f"Заявки со статусом «{status.value}», страница {page}:"
+    if apps:
+        text += "\n\n" + "\n\n".join(render_application_card(item) for item in apps)
+    else:
+        text += "\n\nСписок пуст."
+
+    if callback.message:
         await callback.message.edit_text(
-            f"По статусу '{status.value}' заявок нет.",
+            text,
             reply_markup=admin_pagination_keyboard(status.value, page, total_pages),
         )
-        await callback.answer()
-        return
-
-    text = f"Заявки со статусом '{status.value}', страница {page}:\n\n" + "\n\n".join(
-        [f"#{a.id}: {escape(a.name)}, {escape(a.phone)}, {escape(a.address)}" for a in apps]
-    )
-    await callback.message.edit_text(
-        text,
-        reply_markup=admin_pagination_keyboard(status.value, page, total_pages),
-    )
     await callback.answer()

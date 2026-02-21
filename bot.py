@@ -2,7 +2,6 @@ import asyncio
 import logging
 
 from aiogram import Bot, Dispatcher
-from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import TelegramObject
@@ -35,19 +34,16 @@ async def main() -> None:
     setup_logging()
     settings = get_settings()
 
-    bot = Bot(
-        token=settings.bot_token,
-        default=DefaultBotProperties(parse_mode=ParseMode.HTML),
-    )
-    dp = Dispatcher(storage=MemoryStorage())
+    bot = Bot(token=settings.bot_token, parse_mode=ParseMode.HTML)
+    dispatcher = Dispatcher(storage=MemoryStorage())
 
-    dp.update.middleware(DbSessionMiddleware())
+    dispatcher.update.middleware(DbSessionMiddleware())
 
-    dp.include_router(start.router)
-    dp.include_router(application.router)
-    dp.include_router(admin.router)
+    dispatcher.include_router(start.router)
+    dispatcher.include_router(application.router)
+    dispatcher.include_router(admin.router)
 
-    await dp.start_polling(bot)
+    await dispatcher.start_polling(bot)
 
 
 if __name__ == "__main__":
