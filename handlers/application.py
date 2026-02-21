@@ -1,4 +1,5 @@
 import logging
+from html import escape
 
 from aiogram import Bot, F, Router
 from aiogram.fsm.context import FSMContext
@@ -28,10 +29,10 @@ class ApplicationFSM(StatesGroup):
 def _summary(data: dict) -> str:
     return (
         "Проверьте заявку:\n"
-        f"Имя: {data['name']}\n"
-        f"Телефон: {data['phone']}\n"
-        f"Адрес: {data['address']}\n"
-        f"Описание: {data['description']}\n"
+        f"Имя: {escape(data['name'])}\n"
+        f"Телефон: {escape(data['phone'])}\n"
+        f"Адрес: {escape(data['address'])}\n"
+        f"Описание: {escape(data['description'])}\n"
         f"Фото: {'прикреплено' if data.get('photo') else 'нет'}"
     )
 
@@ -40,11 +41,25 @@ def _owner_text(application_id: int, data: dict) -> str:
     return (
         "🆕 Новая заявка\n"
         f"ID: {application_id}\n"
-        f"Имя: {data['name']}\n"
-        f"Телефон: {data['phone']}\n"
-        f"Адрес: {data['address']}\n"
-        f"Описание: {data['description']}"
+        f"Имя: {escape(data['name'])}\n"
+        f"Телефон: {escape(data['phone'])}\n"
+        f"Адрес: {escape(data['address'])}\n"
+        f"Описание: {escape(data['description'])}"
     )
+
+
+async def _save_text_field(message: Message, state: FSMContext, field_name: str) -> str | None:
+    if not message.text:
+        await message.answer("Пожалуйста, отправьте текстовое сообщение.")
+        return None
+
+    value = message.text.strip()
+    if not value:
+        await message.answer("Поле не должно быть пустым. Введите значение ещё раз.")
+        return None
+
+    await state.update_data(**{field_name: value})
+    return value
 
 
 @router.message(F.text == "Создать заявку")
@@ -56,28 +71,32 @@ async def create_application_start(message: Message, state: FSMContext) -> None:
 
 @router.message(ApplicationFSM.name)
 async def collect_name(message: Message, state: FSMContext) -> None:
-    await state.update_data(name=message.text.strip())
+    if not await _save_text_field(message, state, "name"):
+        return
     await state.set_state(ApplicationFSM.phone)
     await message.answer("Введите телефон:")
 
 
 @router.message(ApplicationFSM.phone)
 async def collect_phone(message: Message, state: FSMContext) -> None:
-    await state.update_data(phone=message.text.strip())
+    if not await _save_text_field(message, state, "phone"):
+        return
     await state.set_state(ApplicationFSM.address)
     await message.answer("Введите адрес:")
 
 
 @router.message(ApplicationFSM.address)
 async def collect_address(message: Message, state: FSMContext) -> None:
-    await state.update_data(address=message.text.strip())
+    if not await _save_text_field(message, state, "address"):
+        return
     await state.set_state(ApplicationFSM.description)
     await message.answer("Опишите проблему:")
 
 
 @router.message(ApplicationFSM.description)
 async def collect_description(message: Message, state: FSMContext) -> None:
-    await state.update_data(description=message.text.strip())
+    if not await _save_text_field(message, state, "description"):
+        return
     await state.set_state(ApplicationFSM.photo)
     await message.answer("Отправьте фото или напишите 'Пропустить'.")
 
